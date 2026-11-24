@@ -4,6 +4,7 @@ import {useState, useRef, useEffect} from 'react'
 import type {FormEvent} from 'react'
 import type { Expense, TransactionType, ExpenseCategory } from './types/expense'
 import SummaryCard from './components/SummaryCard'
+import { createExpense, getExpenses, updateExpense, deleteExpense } from './services/expenseService'
 
 
 function App() {
@@ -13,95 +14,149 @@ function App() {
   const [amount, setAmount] = useState('')
   const [transactionType, setTransactionType] = useState<TransactionType>('expense')
   const [category, setCategory] = useState<ExpenseCategory>('Other')
-  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
-  const [isLoaded, setIsLoaded] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [notification, setNotification] = useState<{
+    message: string
+    type: 'success' | 'error'
+  } | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
 
-  useEffect(() => {
-    const savedExpenses = localStorage.getItem('expenses')
-    if (savedExpenses) {
-      const parsedExpenses = JSON.parse(savedExpenses)
-  
-      const restoredExpenses = parsedExpenses.map((expense: Expense) => ({
-        ...expense,
-        date: new Date(expense.date)
-      }))
 
-      setExpenses(restoredExpenses)
+  async function loadExpenses() {
+    try {
+      const data = await getExpenses()
+      setExpenses(data)
+    } catch (error) {
+      console.error("Failed to load expenses:", error)
+      setError("Unable to load expenses. Please try again.")
+    } finally {
+      setIsLoading(false)
     }
-    setIsLoaded(true)
+  }
+
+  // Load expenses once when the app starts
+  useEffect(() => {
+    loadExpenses()
   }, [])
-  
 
   useEffect(() => {
-    if (!isLoaded) return
+    if (!notification) {
+      return
+    }
 
-    localStorage.setItem('expenses', JSON.stringify(expenses))
-  }, [expenses, isLoaded])
+    const timer = setTimeout(() => {
+      setNotification(null)
+    }, 3000)
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    return () => clearTimeout(timer)
+  }, [notification])
+
+// ---------------------------------------------------------------------------------
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    
 
     if (!title.trim()){
+      setNotification({
+        message: 'Please enter an expense name.',
+        type: 'error'
+      })
       return
     }
 
     const numericAmount = Number(amount)
-
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      setNotification({
+        message: 'Amount must be greater than zero.',
+        type: 'error'
+      })
       return
     }
 
-    if (editingId !== null) {
-      setExpenses((previousExpenses) =>
-        previousExpenses.map((expense) =>
-        
-          expense.id === editingId
-                  ? {   ...expense,
-                    title: title.trim(),
-                    amount: numericAmount,
-                    type: transactionType,
-                    category: category
-                  }
-                  : expense
-              )
-            )
-    } else {
-      const newExpense = {
-        id: Date.now(), 
-        title: title.trim(), 
-        amount: numericAmount,
-        type: transactionType,
-        date: new Date(),
-        category: category
-      }
-      setExpenses((previousExpenses) => [
-        ...previousExpenses, 
-        newExpense
-      ])
+    const expenseData = {
+      title: title.trim(),
+      amount: Number(amount),
+      type: transactionType,
+      category,
+      date: new Date()
     }
 
-    setTitle('')
-    setAmount('')
-    setTransactionType('expense')
-    setEditingId(null)
-    setCategory(category)
-    titleInputRef.current?.focus()
-  }
+    setIsSaving(true)
+    try{
+      if (editingId !== null) {
 
-  function handleDelete(id: number){
-    setExpenses((previousExpenses)=> {
-      return previousExpenses.filter((expense) => {
-        return expense.id !== id
+
+        const restoredExpense = await updateExpense(editingId, expenseData)
+
+        setExpenses(previousExpenses =>
+          previousExpenses.map(expense =>
+            expense.id === editingId ? restoredExpense : expense
+          )
+        )
+        setNotification({
+          message: 'Expense updated successfully!',
+          type: 'success'
+        })
+      } else{
+        const newExpense = await createExpense(expenseData)
+
+        setExpenses(previousExpenses => [
+          ...previousExpenses,
+          newExpense
+        ])
+        setNotification({
+          message: 'Expense created successfully!',
+          type: 'success'
+        })
+      }
+
+      setTitle('')
+      setAmount('')
+      setTransactionType('expense')
+      setEditingId(null)
+      setCategory('Other')
+      titleInputRef.current?.focus()
+    } catch (error) {
+      setNotification({
+        message: 'Unable to connect to the server. Please try again.',
+        type: 'error'
       })
-    })
+    } finally {
+      setIsSaving(false)
+    }
   }
 
-  function handleEdit(expense: Expense){
+
+  // ---------------------------------------------------------------------------------
+  async function handleDelete(id: string){
+    try {
+      await deleteExpense(id)
+
+      setExpenses(previousExpenses =>
+        previousExpenses.filter(expense => expense.id !== id)
+      )
+  
+      setNotification({
+        message: 'Expense deleted successfully!',
+        type: 'success'
+      })
+    } catch (error) {
+      setNotification({
+        message: 'Unable to connect to the server. Please try again.',
+        type: 'error'
+      })
+    }
+  }
+
+  async function handleEdit(expense: Expense){
     setEditingId(expense.id)
     setTitle(expense.title)
     setAmount(String(expense.amount))
     setTransactionType(expense.type)
+    setCategory(expense.category)
   }
 
 
@@ -125,6 +180,11 @@ function App() {
 
   return (
     <>
+    {notification && (
+      <div className={`notification ${notification.type}`}>
+        {notification.message}
+      </div>
+    )}
     <h1>Personal Expense Tracker</h1>
 
     <form className="transaction-form" onSubmit={handleSubmit}>
@@ -169,7 +229,9 @@ function App() {
         <option value="Other">Other</option>
       </select>
 
-      <button type="submit"> {editingId !== null ? 'Save Changes' :`Add ${transactionType === 'expense' ? 'Expense' : 'Refund'}`}</button>
+      <button type="submit" disabled={isSaving}> 
+        {isSaving ? 'Saving...' : editingId !== null ? 'Save Changes' :`Add ${transactionType === 'expense' ? 'Expense' : 'Refund'}`}
+      </button>
     </form>
 
 
@@ -191,21 +253,26 @@ function App() {
       />
     </div>
 
-    {[...expenses]
-      .sort((a, b) => b.date.getTime() - a.date.getTime())
-      .map((expense) => (
-      <ExpenseSummary 
-        key={expense.id} 
-        title={expense.title} 
-        amount={expense.amount} 
-        type={expense.type}
-        date={expense.date}
-        category={expense.category}
-        onDelete={() => handleDelete(expense.id)}
-        onEdit={() => handleEdit(expense)}
-        />
-    ))}
-
+    {isLoading ? (
+      <p>Loading expenses...</p>
+    ) : error ? (
+      <p>{error}</p>
+    ) : (
+      [...expenses]
+        .sort((a, b) => b.date.getTime() - a.date.getTime())
+        .map((expense) => (
+          <ExpenseSummary
+            key={expense.id} 
+            title={expense.title} 
+            amount={expense.amount} 
+            type={expense.type}
+            date={expense.date}
+            category={expense.category}
+            onDelete={() => handleDelete(expense.id)}
+            onEdit={() => handleEdit(expense)}
+          />
+        ))
+    )}
     </>
   )
 }

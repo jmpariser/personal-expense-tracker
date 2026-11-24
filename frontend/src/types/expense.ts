@@ -1,7 +1,7 @@
 export type TransactionType = 'expense' | 'refund'
 
 export type Expense = {
-  id: number
+  id: string
   title: string
   amount: number
   type: TransactionType

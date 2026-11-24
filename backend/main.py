@@ -4,8 +4,17 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models 
 from schemas import ExpenseCreate, ExpenseResponse, ExpenseUpdate
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5176"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 def home():
